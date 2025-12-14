@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Rust Conky - Shell Script GUI
+# Rust Conky - Shell Script GUI with smooth refresh
 # Rust collects data, shell displays it
 
 # Colors for beautiful output
@@ -16,9 +16,26 @@ NC='\033[0m' # No Color
 # Progress bar width
 BAR_WIDTH=20
 
-# Function to clear and show header
-show_header() {
+# Save cursor position and hide cursor
+tput sc
+tput civis
+
+# Trap to show cursor on exit
+cleanup() {
+    tput cnorm
+    tput rc
     clear
+    exit 0
+}
+trap cleanup EXIT INT TERM
+
+# Function to move cursor to top and clear from cursor down
+refresh_screen() {
+    tput cup 0 0
+}
+
+# Function to show header (only once at start)
+show_header() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║           RUST CONKY - SYSTEM MONITOR (SHELL GUI)        ║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
@@ -52,7 +69,7 @@ draw_bar() {
     printf "  ${color}${label}: ["
     for ((i=0; i<filled; i++)); do printf "█"; done
     for ((i=0; i<empty; i++)); do printf "░"; done
-    printf "] %5.1f%%${NC}\n" "$percent"
+    printf "] %5.1f%%${NC}" "$percent"
 }
 
 # Function to format uptime
@@ -67,6 +84,7 @@ format_uptime() {
 if ! command -v jq &> /dev/null; then
     echo -e "${RED}Error: jq is required but not installed.${NC}"
     echo "Install with: sudo apt install jq (Ubuntu/Debian) or brew install jq (macOS)"
+    tput cnorm
     exit 1
 fi
 
@@ -74,6 +92,7 @@ fi
 if ! command -v bc &> /dev/null; then
     echo -e "${RED}Error: bc is required but not installed.${NC}"
     echo "Install with: sudo apt install bc (Ubuntu/Debian) or brew install bc (macOS)"
+    tput cnorm
     exit 1
 fi
 
@@ -83,40 +102,42 @@ if [ ! -f "./target/release/rust-conky" ]; then
     cargo build --release
     if [ $? -ne 0 ]; then
         echo -e "${RED}Failed to build Rust backend${NC}"
+        tput cnorm
         exit 1
     fi
     echo -e "${GREEN}Rust backend built successfully!${NC}"
     sleep 2
 fi
 
-echo -e "${GREEN}Starting Rust Conky...${NC}"
-echo -e "${YELLOW}Press Ctrl+C to exit${NC}"
-sleep 2
+# Clear screen once at start
+clear
+show_header
 
-# Test if Rust backend works
-echo -n "Testing backend... "
-# Filter out non-JSON lines and get first JSON line
-if timeout 2 ./target/release/rust-conky --json 2>&1 | grep '^{' | head -1 | jq -e . >/dev/null 2>&1; then
-    echo -e "${GREEN}OK${NC}"
-else
-    echo -e "${RED}FAILED${NC}"
-    echo "Trying to rebuild..."
-    cargo build --release
-fi
+# Save starting line position
+HEADER_LINES=5
+tput cup $HEADER_LINES 0
 
 # Main display loop
 while true; do
-    show_header
-    
     # Get JSON data from Rust backend - filter non-JSON lines
-    JSON_DATA=$(timeout 3 ./target/release/rust-conky --json 2>&1 | grep '^{' | head -1)
+    JSON_DATA=$(timeout 2 ./target/release/rust-conky --json 2>&1 | grep '^{' | head -1)
     
     if [ -z "$JSON_DATA" ] || ! echo "$JSON_DATA" | jq -e . >/dev/null 2>&1; then
-        echo -e "${RED}Error: Could not get valid data from backend${NC}"
-        echo -e "${YELLOW}Retrying in 3 seconds...${NC}"
-        sleep 3
+        # Move to error position
+        tput cup $((HEADER_LINES + 1)) 0
+        echo -e "${RED}Error: Could not get data${NC}"
+        echo -e "${YELLOW}Retrying...${NC}"
+        sleep 2
+        # Clear error lines
+        tput cup $((HEADER_LINES + 1)) 0
+        tput el
+        tput cup $((HEADER_LINES + 2)) 0
+        tput el
         continue
     fi
+    
+    # Move to content start position
+    tput cup $HEADER_LINES 0
     
     # Parse JSON using jq
     CPU_USAGE=$(echo "$JSON_DATA" | jq -r '.cpu.usage')
@@ -143,24 +164,27 @@ while true; do
     printf "  Usage:   ${GREEN}%5.1f%%${NC} (%d cores)\n" "$CPU_USAGE" "$CPU_COUNT"
     printf "  Load:    %.2f, %.2f, %.2f\n" "$LOAD_ONE" "$LOAD_FIVE" "$LOAD_FIFTEEN"
     draw_bar "$CPU_USAGE" "$GREEN" "CPU"
-    echo
+    echo -e "\n"
     
     # Display Memory section
     echo -e "${CYAN}┌─────────────── MEMORY ───────────────┐${NC}"
     echo -e "  RAM:     $(format_bytes $MEM_USED)/$(format_bytes $MEM_TOTAL)"
     draw_bar "$MEM_PERCENT" "$CYAN" "RAM"
+    echo
     
     if [ "$SWAP_TOTAL" -gt 0 ]; then
         echo -e "  SWAP:    $(format_bytes $SWAP_USED)/$(format_bytes $SWAP_TOTAL)"
         draw_bar "$SWAP_PERCENT" "$BLUE" "SWP"
+        echo
+    else
+        echo
     fi
-    echo
     
-    # Display Disk section (first 3 disks)
+    # Display Disk section (first 2 disks)
     echo -e "${YELLOW}┌──────────────── DISKS ────────────────┐${NC}"
     DISK_COUNT=$(echo "$JSON_DATA" | jq '.disks | length')
     if [ "$DISK_COUNT" -gt 0 ]; then
-        for ((i=0; i<DISK_COUNT && i<3; i++)); do
+        for ((i=0; i<DISK_COUNT && i<2; i++)); do
             DISK_NAME=$(echo "$JSON_DATA" | jq -r ".disks[$i].name")
             DISK_TOTAL=$(echo "$JSON_DATA" | jq -r ".disks[$i].total")
             DISK_AVAIL=$(echo "$JSON_DATA" | jq -r ".disks[$i].available")
@@ -176,11 +200,11 @@ while true; do
             
             echo -e "  ${MOUNT_NAME}: $(format_bytes $DISK_USED)/$(format_bytes $DISK_TOTAL)"
             draw_bar "$DISK_PERCENT" "$YELLOW" "USE"
+            echo
         done
     else
-        echo -e "  No disks found"
+        echo -e "  No disks found\n"
     fi
-    echo
     
     # Display Network section
     echo -e "${MAGENTA}┌─────────────── NETWORK ───────────────┐${NC}"
@@ -196,13 +220,13 @@ while true; do
     else
         echo -e "  No network interfaces found"
     fi
-    echo
+    echo -e "\n"
     
     # Display Top Processes
     echo -e "${RED}┌───────────── TOP PROCESSES ─────────────┐${NC}"
     PROC_COUNT=$(echo "$JSON_DATA" | jq '.processes | length')
     if [ "$PROC_COUNT" -gt 0 ]; then
-        for ((i=0; i<PROC_COUNT && i<5; i++)); do
+        for ((i=0; i<PROC_COUNT && i<3; i++)); do
             PROC_NAME=$(echo "$JSON_DATA" | jq -r ".processes[$i].name")
             PROC_PID=$(echo "$JSON_DATA" | jq -r ".processes[$i].pid")
             PROC_CPU=$(echo "$JSON_DATA" | jq -r ".processes[$i].cpu_usage")
@@ -219,7 +243,7 @@ while true; do
     else
         echo -e "  No processes data"
     fi
-    echo
+    echo -e "\n"
     
     # Display System Info
     echo -e "${WHITE}┌─────────────── SYSTEM ────────────────┐${NC}"
@@ -228,6 +252,12 @@ while true; do
     echo -e "  Status:  ${GREEN}Running${NC}"
     echo -e "${YELLOW}  Press Ctrl+C to exit${NC}"
     
+    # Clear any remaining lines from previous update
+    tput ed
+    
     # Wait 1 second before refreshing
     sleep 1
 done
+
+# Show cursor when done
+tput cnorm
