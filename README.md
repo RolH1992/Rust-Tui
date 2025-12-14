@@ -21,8 +21,8 @@ A system monitor written in Rust, inspired by the original Conky.
 - Rust and Cargo installed
 
 ### From Source
-git clone https://github.com/RolH1992/Rust-conky.git
-cd Rust-conky
-cargo build --release
-chmod +x conky.sh
-./conky.sh
+- git clone https://github.com/RolH1992/Rust-conky.git
+- cd Rust-conky
+- cargo build --release
+- chmod +x conky.sh
+- ./conky.sh
