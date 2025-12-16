@@ -1,3 +1,4 @@
+use chrono;
 use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, Networks, System};
 
 pub struct SystemInfo {
@@ -20,15 +21,18 @@ impl SystemInfo {
     }
 
     pub fn refresh(&mut self) {
+        // Refresh CPU, memory, processes, networks, and disks
         self.system
             .refresh_cpu_specifics(CpuRefreshKind::everything());
         self.system
             .refresh_memory_specifics(MemoryRefreshKind::everything());
+        self.system
+            .refresh_processes(sysinfo::ProcessesToUpdate::All, true); // Corrected variant
         self.networks.refresh(false);
         self.disks.refresh(false);
     }
 
-    // CPU
+    // CPU Information
     pub fn cpu_usage(&self) -> f32 {
         self.system.global_cpu_usage()
     }
@@ -37,7 +41,7 @@ impl SystemInfo {
         self.system.cpus().len()
     }
 
-    // Memory
+    // Memory Information
     pub fn memory_usage(&self) -> (u64, u64) {
         (self.system.used_memory(), self.system.total_memory())
     }
@@ -46,7 +50,7 @@ impl SystemInfo {
         (self.system.used_swap(), self.system.total_swap())
     }
 
-    // Network
+    // Network Information
     pub fn network_stats(&self) -> Vec<(String, u64, u64)> {
         self.networks
             .iter()
@@ -54,7 +58,7 @@ impl SystemInfo {
             .collect()
     }
 
-    // Disk
+    // Disk Information
     pub fn disk_stats(&self) -> Vec<(String, u64, u64, String)> {
         self.disks
             .iter()
@@ -69,7 +73,7 @@ impl SystemInfo {
             .collect()
     }
 
-    // Processes
+    // Processes Information
     pub fn top_processes(&self, count: usize) -> Vec<(String, u32, f32, u64)> {
         let mut processes: Vec<_> = self
             .system
@@ -85,13 +89,14 @@ impl SystemInfo {
             })
             .collect();
 
-        // Sort by CPU usage descending
+        // Sort by CPU usage in descending order
         processes.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
 
+        // Return the top `count` processes
         processes.into_iter().take(count).collect()
     }
 
-    // System info
+    // System Information
     pub fn uptime(&self) -> u64 {
         System::uptime()
     }
@@ -206,7 +211,7 @@ impl<'a> From<&'a SystemInfo> for SystemData {
                 })
                 .collect(),
             processes: sys_info
-                .top_processes(5)
+                .top_processes(5) // Call the top_processes method here
                 .iter()
                 .map(|(name, pid, cpu, memory)| ProcessData {
                     name: name.clone(),

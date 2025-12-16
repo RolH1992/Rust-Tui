@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Rust Conky - Shell Script GUI with smooth refresh
-# Rust collects data, shell displays it
+# For Wayland support on Arch Linux
 
 # Colors for beautiful output
 RED='\033[0;31m'
@@ -12,9 +12,18 @@ MAGENTA='\033[0;35m'
 CYAN='\033[0;36m'
 WHITE='\033[1;37m'
 NC='\033[0m' # No Color
+BOLD='\033[1m' # Bold text
 
 # Progress bar width
 BAR_WIDTH=20
+
+# Detect Wayland
+if [ "$XDG_SESSION_TYPE" = "wayland" ]; then
+    IS_WAYLAND=true
+    echo -e "${YELLOW}Detected Wayland session${NC}"
+else
+    IS_WAYLAND=false
+fi
 
 # Save cursor position and hide cursor
 tput sc
@@ -36,9 +45,9 @@ refresh_screen() {
 
 # Function to show header (only once at start)
 show_header() {
-    echo -e "${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║           RUST CONKY - SYSTEM MONITOR (SHELL GUI)        ║${NC}"
-    echo -e "${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${CYAN}${BOLD}   ╔═════════════════════════════╗${NC}"
+    echo -e "${CYAN}${BOLD}   ║ RUST CONKY - SYSTEM MONITOR ║${NC}"
+    echo -e "${CYAN}${BOLD}   ╚═════════════════════════════╝${NC}"
     echo
 }
 
@@ -56,7 +65,7 @@ format_bytes() {
     fi
 }
 
-# Function to draw progress bar - FIXED for floating point
+# Function to draw progress bar
 draw_bar() {
     local percent=$1
     local color=$2
@@ -80,66 +89,103 @@ format_uptime() {
     printf "%dh %dm" "$hours" "$minutes"
 }
 
-# Check if jq is installed
-if ! command -v jq &> /dev/null; then
-    echo -e "${RED}Error: jq is required but not installed.${NC}"
-    echo "Install with: sudo apt install jq (Ubuntu/Debian) or brew install jq (macOS)"
-    tput cnorm
-    exit 1
-fi
-
-# Check if bc is installed (needed for calculations)
-if ! command -v bc &> /dev/null; then
-    echo -e "${RED}Error: bc is required but not installed.${NC}"
-    echo "Install with: sudo apt install bc (Ubuntu/Debian) or brew install bc (macOS)"
-    tput cnorm
-    exit 1
-fi
-
-# Check if Rust binary exists, build if not
-if [ ! -f "./target/release/rust-conky" ]; then
-    echo -e "${YELLOW}Building Rust backend...${NC}"
-    cargo build --release
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}Failed to build Rust backend${NC}"
-        tput cnorm
+# Function to check dependencies
+check_dependencies() {
+    local missing=()
+    
+    # Check for jq
+    if ! command -v jq &> /dev/null; then
+        missing+=("jq")
+    fi
+    
+    # Check for bc
+    if ! command -v bc &> /dev/null; then
+        missing+=("bc")
+    fi
+    
+    # Check for rustc/cargo
+    if ! command -v cargo &> /dev/null; then
+        missing+=("rust")
+    fi
+    
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo -e "${RED}Missing dependencies:${NC}"
+        for dep in "${missing[@]}"; do
+            echo "  - $dep"
+        done
+        echo
+        echo -e "${YELLOW}Install with:${NC}"
+        echo "  sudo pacman -S ${missing[*]}"
+        if [[ " ${missing[*]} " =~ " rust " ]]; then
+            echo "  For rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs   | sh"
+        fi
         exit 1
     fi
-    echo -e "${GREEN}Rust backend built successfully!${NC}"
-    sleep 2
-fi
+}
 
-# Clear screen once at start
-clear
-show_header
-
-# Save starting line position
-HEADER_LINES=5
-tput cup $HEADER_LINES 0
-
-# Main display loop
-while true; do
-    # Get JSON data from Rust backend - filter non-JSON lines
-    JSON_DATA=$(timeout 2 ./target/release/rust-conky --json 2>&1 | grep '^{' | head -1)
+# Main function
+main() {
+    # Check dependencies
+    check_dependencies
     
-    if [ -z "$JSON_DATA" ] || ! echo "$JSON_DATA" | jq -e . >/dev/null 2>&1; then
-        # Move to error position
-        tput cup $((HEADER_LINES + 1)) 0
-        echo -e "${RED}Error: Could not get data${NC}"
-        echo -e "${YELLOW}Retrying...${NC}"
+    # Build Rust backend if needed
+    if [ ! -f "./target/release/rust-conky" ]; then
+        echo -e "${YELLOW}Building Rust backend...${NC}"
+        cargo build --release
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}Failed to build Rust backend${NC}"
+            tput cnorm
+            exit 1
+        fi
+        echo -e "${GREEN}Rust backend built successfully!${NC}"
         sleep 2
-        # Clear error lines
-        tput cup $((HEADER_LINES + 1)) 0
-        tput el
-        tput cup $((HEADER_LINES + 2)) 0
-        tput el
-        continue
     fi
     
-    # Move to content start position
+    # Clear screen once at start
+    clear
+    show_header
+    
+    # Save starting line position
+    HEADER_LINES=5
     tput cup $HEADER_LINES 0
     
-    # Parse JSON using jq
+    # Main display loop
+    while true; do
+        # Get JSON data from Rust backend
+        JSON_DATA=$(timeout 2 ./target/release/rust-conky --json 2>&1 | grep '^{' | head -1)
+        
+        if [ -z "$JSON_DATA" ] || ! echo "$JSON_DATA" | jq -e . >/dev/null 2>&1; then
+            # Move to error position
+            tput cup $((HEADER_LINES + 1)) 0
+            echo -e "${RED}Error: Could not get data${NC}"
+            echo -e "${YELLOW}Retrying...${NC}"
+            sleep 2
+            # Clear error lines
+            tput cup $((HEADER_LINES + 1)) 0
+            tput el
+            tput cup $((HEADER_LINES + 2)) 0
+            tput el
+            continue
+        fi
+        
+        # Move to content start position
+        tput cup $HEADER_LINES 0
+        
+        # Parse JSON data
+        parse_and_display "$JSON_DATA"
+        
+        # Clear any remaining lines from previous update
+        tput ed
+        
+        # Wait 1 second before refreshing
+        sleep 1
+    done
+}
+
+# Function to parse and display data
+parse_and_display() {
+    local JSON_DATA="$1"
+    
     CPU_USAGE=$(echo "$JSON_DATA" | jq -r '.cpu.usage')
     CPU_COUNT=$(echo "$JSON_DATA" | jq -r '.cpu.count')
     LOAD_ONE=$(echo "$JSON_DATA" | jq -r '.cpu.load_average.one')
@@ -160,14 +206,14 @@ while true; do
     UPTIME=$(echo "$JSON_DATA" | jq -r '.system.uptime')
     
     # Display CPU section
-    echo -e "${GREEN}┌──────────────── CPU ────────────────┐${NC}"
+    echo -e "${GREEN}${BOLD}┌──────────────── CPU ────────────────┐${NC}"
     printf "  Usage:   ${GREEN}%5.1f%%${NC} (%d cores)\n" "$CPU_USAGE" "$CPU_COUNT"
     printf "  Load:    %.2f, %.2f, %.2f\n" "$LOAD_ONE" "$LOAD_FIVE" "$LOAD_FIFTEEN"
     draw_bar "$CPU_USAGE" "$GREEN" "CPU"
     echo -e "\n"
     
     # Display Memory section
-    echo -e "${CYAN}┌─────────────── MEMORY ───────────────┐${NC}"
+    echo -e "${CYAN}${BOLD}┌─────────────── MEMORY ──────────────┐${NC}"
     echo -e "  RAM:     $(format_bytes $MEM_USED)/$(format_bytes $MEM_TOTAL)"
     draw_bar "$MEM_PERCENT" "$CYAN" "RAM"
     echo
@@ -180,8 +226,8 @@ while true; do
         echo
     fi
     
-    # Display Disk section (first 2 disks)
-    echo -e "${YELLOW}┌──────────────── DISKS ────────────────┐${NC}"
+    # Display Disk section
+    echo -e "${YELLOW}${BOLD}┌──────────────── DISKS ─────────────┐${NC}"
     DISK_COUNT=$(echo "$JSON_DATA" | jq '.disks | length')
     if [ "$DISK_COUNT" -gt 0 ]; then
         for ((i=0; i<DISK_COUNT && i<2; i++)); do
@@ -192,11 +238,8 @@ while true; do
             DISK_USED=$((DISK_TOTAL - DISK_AVAIL))
             DISK_PERCENT=$(echo "scale=1; $DISK_USED * 100 / $DISK_TOTAL" | bc)
             
-            # Shorten mount point for display
             MOUNT_NAME=$(basename "$DISK_MOUNT")
-            if [ "$MOUNT_NAME" = "/" ]; then
-                MOUNT_NAME="root"
-            fi
+            [ "$MOUNT_NAME" = "/" ] && MOUNT_NAME="root"
             
             echo -e "  ${MOUNT_NAME}: $(format_bytes $DISK_USED)/$(format_bytes $DISK_TOTAL)"
             draw_bar "$DISK_PERCENT" "$YELLOW" "USE"
@@ -207,7 +250,7 @@ while true; do
     fi
     
     # Display Network section
-    echo -e "${MAGENTA}┌─────────────── NETWORK ───────────────┐${NC}"
+    echo -e "${MAGENTA}${BOLD}┌─────────────── NETWORK ───────────┐${NC}"
     NET_COUNT=$(echo "$JSON_DATA" | jq '.network | length')
     if [ "$NET_COUNT" -gt 0 ]; then
         for ((i=0; i<NET_COUNT && i<2; i++)); do
@@ -223,7 +266,7 @@ while true; do
     echo -e "\n"
     
     # Display Top Processes
-    echo -e "${RED}┌───────────── TOP PROCESSES ─────────────┐${NC}"
+    echo -e "${RED}${BOLD}┌───────────── TOP PROCESSES ──────────┐${NC}"
     PROC_COUNT=$(echo "$JSON_DATA" | jq '.processes | length')
     if [ "$PROC_COUNT" -gt 0 ]; then
         for ((i=0; i<PROC_COUNT && i<3; i++)); do
@@ -232,10 +275,7 @@ while true; do
             PROC_CPU=$(echo "$JSON_DATA" | jq -r ".processes[$i].cpu_usage")
             PROC_MEM=$(echo "$JSON_DATA" | jq -r ".processes[$i].memory")
             
-            # Shorten long process names
-            if [ ${#PROC_NAME} -gt 20 ]; then
-                PROC_NAME="${PROC_NAME:0:17}..."
-            fi
+            [ ${#PROC_NAME} -gt 20 ] && PROC_NAME="${PROC_NAME:0:17}..."
             
             printf "  %5s ${RED}%4.0f%%${NC} %6s ${WHITE}%s${NC}\n" \
                    "$PROC_PID" "$PROC_CPU" "$(format_bytes $PROC_MEM)" "$PROC_NAME"
@@ -246,18 +286,12 @@ while true; do
     echo -e "\n"
     
     # Display System Info
-    echo -e "${WHITE}┌─────────────── SYSTEM ────────────────┐${NC}"
+    echo -e "${WHITE}${BOLD}┌─────────────── SYSTEM ──────────────┐${NC}"
     echo -e "  Uptime:  $(format_uptime $UPTIME)"
-    echo -e "  Update:  Every 1 second"
+    echo -e "  Session: ${IS_WAYLAND:+Wayland}${IS_WAYLAND:-X11}"
     echo -e "  Status:  ${GREEN}Running${NC}"
-    echo -e "${YELLOW}  Press Ctrl+C to exit${NC}"
-    
-    # Clear any remaining lines from previous update
-    tput ed
-    
-    # Wait 1 second before refreshing
-    sleep 1
-done
+    echo -e "${YELLOW}${BOLD}  Press Ctrl+C to exit${NC}"
+}
 
-# Show cursor when done
-tput cnorm
+# Run main function
+main
