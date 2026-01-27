@@ -1,4 +1,4 @@
-# Rust Conky
+# Rust TUI
 
 A system monitor written in Rust, inspired by the original Conky.
 
