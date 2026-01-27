@@ -20,12 +20,26 @@ A system monitor written in Rust, inspired by the original Conky.
 ### Prerequisites
 - Rust and Cargo installed
 
-### From Source
-- git clone https://github.com/RolH1992/Rust-conky.git
-- cd Rust-conky
-- cargo build --release
-- chmod +x conky.sh
-- ./conky.sh
+- Clone and enter the project
+git clone https://github.com/RolH1992/Rust-Tui.git
+cd Rust-Tui
+- Run in development mode
+cargo run
+- Run tests
+cargo test
+- Format code
+cargo fmt
+- Check for linting issues
+cargo clippy
+
+# Run the application
+rust-tui
+
+# With specific configuration
+rust-tui --config /path/to/config.toml
+
+# Show help
+rust-tui --help
 
 ## ✨ Latest Improvements
 
